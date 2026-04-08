@@ -9,6 +9,7 @@ A personal project: a **Flask** backend that orchestrates an LLM plus a big pile
 - [What this is](#what-this-is)
 - [What’s in the repo](#whats-in-the-repo)
 - [Features (high level)](#features-high-level)
+- [MCP-style design & vector search](#mcp-style-design--vector-search)
 - [Platforms & tools](#platforms--tools)
 - [Architecture](#architecture)
 - [Quick start](#quick-start)
@@ -42,9 +43,44 @@ This is **not** a product, SLA, or supported service. It’s my sandbox; breakag
 
 - **Natural language** → model decides which tools to call; multi-step loops until it has an answer.
 - **Many integrations** behind one auth model (unified token on `/chat`).
-- **Semantic / vector-style context** where configured (see backend docs).
+- **MCP-aligned structure**: domain boundaries, tool schemas, and a single registry the LLM sees—see [below](#mcp-style-design--vector-search).
+- **Semantic search across the workspace** via **Qdrant** + embeddings—not just keyword grep—when `vector_context_search` and infra are enabled.
 - **Optional UI** for quick prompts without Postman.
 - **Personalization hooks** (e.g. style profiles) when the data exists in Mongo.
+
+---
+
+## MCP-style design & vector search
+
+This is the part I actually cared about getting **right**: not bolting random HTTP calls onto a chatbot, but treating each workspace as a **tool surface** the model can reason over, and separating **retrieval** (vector + Mongo) from **actions** (send email, create card, etc.).
+
+### How I use MCP patterns here
+
+I don’t ship a separate MCP daemon for every install; instead the backend uses **`FastMCP`** (`mcp.server.fastmcp`) to model **one logical MCP server per domain**—Gmail, Calendar, Slack, Docs, Sheets, Slides, Notion, Trello, transcripts, etc.—in `agent_backend/app/server.py`. Those surfaces are wired into **one tool registry** (`app/server_parts.py`) with JSON schemas in `app/structures.py`, so the assistant gets a **consistent function-calling contract** (names, arguments, descriptions) regardless of which SaaS is behind the call.
+
+On top of that I use **tool filtering** (see `docs/TOOL_FILTERING_FLOW_EXPLANATION.md` and `utils/tool_filter.py`) so we don’t dump 100+ tools into every request when the prompt only needs a subset—keeps latency and confusion down.
+
+That combination—**MCP-style modular servers + centralized registry + optional filtering**—is how I keep the agent usable as the integration list grows.
+
+### Vector search (Qdrant + embeddings)
+
+Keyword search across Gmail/Slack/Docs is not enough for “what else is related to this thread?” I added a dedicated **`vector_context_search`** tool (registered next to the other tools in `server_parts.py`, schema in `structures.py`). Under the hood, `agent_backend/clients/qdrant_vector_client.py`:
+
+- Talks to **Qdrant** (`QDRANT_URL`) with **per-domain collections** (e.g. Gmail, Slack, Calendar, Docs/Sheets/Slides, Trello, Notion—see `TOOL_COLLECTION_MAP` in that client).
+- Builds query embeddings with **OpenAI** (`text-embedding-3-small` in this client path), **L2-normalizes** vectors for cosine-style similarity, and runs **thresholded** similarity search (`VECTOR_THRESHOLD`, default ~0.30—tunable so I don’t flood the model with noise).
+- Respects **tenant/user** boundaries via the same auth helpers used elsewhere (not “search the whole cluster blindly”).
+
+Mongo holds the **source text** and optional **embedding vectors** for documents I index; I was deliberate about **projections** (read `embedding_text` for humans, use vectors only for matching—see `docs/MONGODB_PROJECTION_FIX.md`) so queries stay fast and we don’t mix invalid inclusion/exclusion in Mongo.
+
+The **system prompt** in `assistant_handler.py` explicitly tells the model when to call **`vector_context_search`**: cross-platform “find anything about X”, extra correlation after another tool returns IDs, and a **single retry** with rephrased query if the first pass is empty—so the behavior is **intentional**, not accidental retrieval spam.
+
+### Embeddings elsewhere
+
+For experiments and sanity checks, **`docs/TEST_EMBEDDINGS_README.md`** describes **Bedrock Titan** embedding tests (separate from the Qdrant query path above). Useful when I’m validating AWS-side models vs OpenAI embeddings.
+
+### What you need turned on
+
+Vector search is **optional**: without `QDRANT_URL`, a working OpenAI key for embeddings, and populated collections, the tool degrades gracefully (the client reports configuration errors instead of fake results). The rest of the stack still runs for normal tool calls.
 
 ---
 
@@ -82,12 +118,14 @@ Rough data flow:
 └──────────┬──────────┘
            │ invoke_ai_with_fallback (OpenAI / Bedrock per switches)
            ▼
-┌─────────────────────┐     ┌──────────────────┐
-│  Tool loop          │────▶│  services/       │
-│  tools[name](…)     │     │  clients/        │
-└─────────────────────┘     └────────┬─────────┘
-                                     ▼
-                            Mongo, external APIs, vectors, …
+┌─────────────────────┐     ┌──────────────────────────────┐
+│  Tool loop          │────▶│  services/ + FastMCP modules │
+│  tools[name](…)     │     │  clients/ (Mongo, APIs, …)   │
+└─────────────────────┘     └────────┬─────────────────────┘
+                                     │
+              ┌──────────────────────┼──────────────────────┐
+              ▼                      ▼                      ▼
+         Google / Slack / …     MongoDB              Qdrant (vector_context_search)
 ```
 
 - **Entry**: `agent_backend/app.py` runs the Flask app.
@@ -193,6 +231,7 @@ projectChat/
 
 ## Notes
 
+- The backend folder used to be called `unified_mcp`; I renamed it to **`agent_backend`** here so the layout matches how I think about it.
 - If you fork this, treat **secrets** as radioactive: rotate anything that ever lived in a committed file or a public remote.
 - Questions and PRs aren’t expected—this is primarily for my own machines—but you’re welcome to read and adapt.
 
