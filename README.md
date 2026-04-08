@@ -193,7 +193,6 @@ projectChat/
 
 ## Notes
 
-- I renamed the old `unified_mcp` tree to **`agent_backend`** inside this repo so the layout matches how I think about it.
 - If you fork this, treat **secrets** as radioactive: rotate anything that ever lived in a committed file or a public remote.
 - Questions and PRs aren’t expected—this is primarily for my own machines—but you’re welcome to read and adapt.
 
