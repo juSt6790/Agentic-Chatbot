@@ -1,0 +1,48 @@
+name: Sync agent_backend (main) to Azure DevOps
+
+on:
+  push:
+    branches:
+      - main   # Trigger only when main branch is updated
+
+jobs:
+  sync:
+    name: Sync to Azure DevOps main branch
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout GitHub repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history for accurate sync
+
+      - name: Set up Git identity
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Push main branch to Azure DevOps
+        env:
+          AZURE_DEVOPS_PAT: ${{ secrets.AZURE_DEVOPS_PAT }}
+        run: |
+          # 🔧 Replace these placeholders with your Azure DevOps details
+          ORG="sujosu"
+          PROJECT="corpusinsight"
+          REPO="unified_mcp_kirat"
+
+          # Azure DevOps Git URL with PAT authentication
+          AZURE_REPO_URL="https://${AZURE_DEVOPS_PAT}@dev.azure.com/${ORG}/${PROJECT}/_git/${REPO}"
+          # AZURE_REPO_URL="https://git:${AZURE_DEVOPS_PAT}@dev.azure.com/${ORG}/${PROJECT}/_git/${REPO}" 
+
+          echo "Syncing GitHub main branch to Azure DevOps main branch..."
+          git remote add azure "$AZURE_REPO_URL"
+
+          # Ensure the main branch exists locally (first run safety)
+          if ! git show-ref --verify --quiet refs/heads/main; then
+            echo "No local main branch found. Creating it..."
+            git checkout -b main
+          fi
+
+          # Push GitHub main to Azure DevOps main
+          git push azure main:main --force
+ 

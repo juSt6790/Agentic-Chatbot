@@ -1,0 +1,49 @@
+# --- Python / backend (agent_backend + root venv) ---
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+.tox/
+dist/
+build/
+*.egg-info/
+*.egg
+
+# Secrets and env (never commit real keys)
+.env
+.env.*
+!.env.example
+**/credentials.json
+**/token.json
+**/client_secret*.json
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Logs and local scratch
+*.log
+logs/
+compare/
+*.out
+nohup.out
+
+# --- Node / frontend ---
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+*.local
+
+# Optional lockfile noise (keep package-lock.json — do commit it)
+# frontend/.pnpm-store/
